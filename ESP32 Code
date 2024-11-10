@@ -1,0 +1,111 @@
+#include <OneWire.h>  //required library for DS18B20 temperature sensor
+#include <DallasTemperature.h> //required library for DS18B20 ttemperature sensor
+#include <WiFi.h>  // required library for wifi connectivity
+#include <HTTPClient.h> //this sends HTTP requests to remote server
+
+// DS18B20 connected to GPIO 32 on the ESP32
+#define ONE_WIRE_BUS 32
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+// Connecting the heart rate sensor to the GPIO pin 33
+#define HEART_RATE_PIN 33
+
+int heartRateValue = 0;
+
+// Wi-Fi credentials
+const char* ssid = "Tharidi";           // Wi-Fi network name
+const char* password = "Gamagetp9";   // Wi-Fi password
+
+// Server URL (local server's IP address)
+const char* serverName = "http://192.168.141.72/pulseminde_1.0/store_data.php"; // server's IP
+
+void setup() {
+  // This sets pin 12 for control LED
+  pinMode(12, OUTPUT);
+
+  // This starts serial communication
+  Serial.begin(115200);
+
+  // Initialize the DS18B20 sensor
+  sensors.begin();
+
+  // Configuring the GPIO pin 33
+  pinMode(HEART_RATE_PIN, INPUT);
+
+  // Below code line connects Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);  //wait for 1 second before checking the connection again.
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("Connected to WiFi");
+}
+
+void loop() {
+  // Request a temperature reading from the DS18B20
+  sensors.requestTemperatures();
+  float temperatureC = sensors.getTempCByIndex(0);
+
+  // This reads heart rate sensor value
+  heartRateValue = analogRead(HEART_RATE_PIN);
+
+  // The value stored in the HeartRateValue variable (depending on the sensor)
+  int pulse = map(heartRateValue, 0, 4095, 40, 100); //This takes the raw analog value and map into 40, 100 range
+  // Below code line calculates the stress index value
+  float stress_index = (pulse - 80) / 80.0 + (temperatureC - 33) / 33.0;
+
+  // Below 3 code blocks display the temperature, pulse rate and stress index values on serial monitor
+  Serial.print("Temperature: ");
+  Serial.print(temperatureC); 
+  Serial.println(" °C");
+
+  Serial.print("Heart Rate: "); 
+  Serial.println(pulse);
+
+  Serial.print("Stress index: ");
+  Serial.println(stress_index);
+
+  //  Sends data to server
+  if (WiFi.status() == WL_CONNECTED) {
+
+   digitalWrite(12, HIGH);  //This turns on LED
+   delay(1000); // This waits for 1 second with the LED on
+   digitalWrite(12, LOW); //This turns off the LED
+   delay(1000); // Waits 1 second with the LED off
+
+    HTTPClient http;
+
+    // This Specifies request destination
+    http.begin(serverName);
+
+    // Specify content type
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    // prepare data to send
+    String httpRequestData = "temperature=" + String(temperatureC, 2) +
+                             "&heart_rate=" + String(pulse) +
+                             "&stress_index=" + String(stress_index, 2);
+
+    // Send HTTP POST request
+    int httpResponseCode = http.POST(httpRequestData);
+
+    // Check for success
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println("Server Response: " + response);
+    } else {
+      Serial.println("Error on sending POST: " + String(httpResponseCode));
+    }
+
+    // Free resources
+    http.end();
+  } else {
+    Serial.println("WiFi not connected");
+  }
+
+  // This will add a delay before the next reading
+  delay(2000);  //This waits for 2 seconds before next loop
+}
